@@ -68,7 +68,7 @@ jobs:
       - name: Call Sample App Endpoint
         id: call-endpoint
         run: |
-          echo "traceId=$(curl localhost:8080/test)" >> $GITHUB_OUTPUT
+          echo "traceId=$(curl localhost:8080/test | tr -d '\n')" >> $GITHUB_OUTPUT
       - name: Check if traces are successfully sent to AWS X-Ray
         run: |
           sleep 20
