@@ -131,6 +131,7 @@ jobs:
           gh release create `
             --target "$env:GITHUB_REF_NAME" `
             --title "Release ADOT X-Ray UDP Exporter v${{ github.event.inputs.version }}-${{ steps.commit.outputs.sha_short }}" `
+            --latest=false `
             --notes-file release_notes.md `
             --draft `
             "Exporter.Xray.Udp-${{ github.event.inputs.version }}" `
