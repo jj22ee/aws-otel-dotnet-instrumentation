@@ -130,7 +130,7 @@ jobs:
         run: |
           gh release create `
             --target "$env:GITHUB_REF_NAME" `
-            --title "ADOT OTLP UDP Exporter v${{ github.event.inputs.version }}-${{ steps.commit.outputs.sha_short }}" `
+            --title "Release ADOT X-Ray UDP Exporter v${{ github.event.inputs.version }}-${{ steps.commit.outputs.sha_short }}" `
             --notes-file release_notes.md `
             --draft `
             "Exporter.Xray.Udp-${{ github.event.inputs.version }}" `
