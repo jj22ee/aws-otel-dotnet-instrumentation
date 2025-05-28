@@ -22,6 +22,19 @@
     <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.0" />
   </ItemGroup>
 
+  <PropertyGroup Condition=" '$(_IsPacking)' == 'true' ">
+    <!-- NuGet packages -->
+    <IsPackable>true</IsPackable>
+    <PackageProjectUrl>https://github.com/aws-observability/aws-otel-dotnet-instrumentation/</PackageProjectUrl>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageReadmeFile>docs/readme.md</PackageReadmeFile>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <PackageReleaseNotes>See release notes at https://github.com/aws-observability/aws-otel-dotnet-instrumentation/releases</PackageReleaseNotes>
+    <PackageTags>OpenTelemetry;OTEL;tracing;Lambda;AWS</PackageTags>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/aws-observability/aws-otel-dotnet-instrumentation.git</RepositoryUrl>
+  </PropertyGroup>
+
   <!-- Items that are only added when building the NuGet package -->
   <ItemGroup Condition=" '$(_IsPacking)' == 'true' ">
     <None Include="nuget-readme.md" Pack="true" PackagePath="\docs\readme.md" />
