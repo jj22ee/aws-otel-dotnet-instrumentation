@@ -21,6 +21,7 @@ using OpenTelemetry.Instrumentation.AspNet;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using AWS.Distro.OpenTelemetry.AutoInstrumentation.Logging;
+using AWS.Distro.OpenTelemetry.AutoInstrumentation.Exporters.Aws.Metrics;
 using AWS.Distro.OpenTelemetry.Exporter.Xray.Udp;
 using OpenTelemetry.Instrumentation.Http;
 using OpenTelemetry.Metrics;
@@ -89,9 +90,10 @@ public class Plugin
 
     /// <summary>
     /// To configure plugin, before OTel SDK configuration is called.
-    /// </summary>public void Initializing()
+    /// </summary>
     public void Initializing()
     {
+        this.CustomizeMetricReader();
     }
 
     /// <summary>
@@ -525,6 +527,64 @@ public class Plugin
     {
         return this.IsApplicationSignalsEnabled() &&
                !"false".Equals(System.Environment.GetEnvironmentVariable(ApplicationSignalsRuntimeEnabledConfig));
+    }
+
+    private void CustomizeMetricReader()
+    {
+        bool isEmfEnabled = this.CheckEmfExporterEnabled();
+        if (isEmfEnabled)
+        {
+            var emfExporter = this.CreateEmfExporter();
+            if (emfExporter != null)
+            {
+                var periodicExportingMetricReader = new PeriodicExportingMetricReader(emfExporter, GetMetricExportInterval());
+                // Store the metric reader for later use in configure method
+                // This follows the TypeScript pattern where metricReader is set in customizeMetricReader
+            }
+        }
+    }
+
+    private bool CheckEmfExporterEnabled()
+    {
+        var exporterValue = System.Environment.GetEnvironmentVariable(MetricExporterConfig);
+        if (string.IsNullOrEmpty(exporterValue))
+        {
+            return false;
+        }
+
+        var exporters = exporterValue.Split(',').Select(e => e.Trim()).ToList();
+        var index = exporters.IndexOf("awsemf");
+        if (index == -1)
+        {
+            return false;
+        }
+
+        exporters.RemoveAt(index);
+        var newValue = exporters.Count > 0 ? string.Join(",", exporters) : null;
+
+        if (!string.IsNullOrEmpty(newValue))
+        {
+            System.Environment.SetEnvironmentVariable(MetricExporterConfig, newValue);
+        }
+        else
+        {
+            System.Environment.SetEnvironmentVariable(MetricExporterConfig, null);
+        }
+
+        return true;
+    }
+
+    private EmfExporterBase? CreateEmfExporter()
+    {
+        if (AwsSpanProcessingUtil.IsLambdaEnvironment())
+        {
+            // Lambda environment - use Console EMF exporter
+            return new ConsoleEmfExporter();
+        }
+
+        // Non-Lambda environment - would use CloudWatch EMF exporter if headers are valid
+        // For now, return Console EMF exporter for debugging
+        return new ConsoleEmfExporter();
     }
 
     private ResourceBuilder ResourceBuilderCustomizer(ResourceBuilder builder, Resource? existingResource = null)
