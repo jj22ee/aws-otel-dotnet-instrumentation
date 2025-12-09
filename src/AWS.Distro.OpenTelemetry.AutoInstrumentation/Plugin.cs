@@ -87,6 +87,7 @@ public class Plugin
         };
 
     private Sampler? sampler;
+    private MetricReader? emfMetricReader;
 
     /// <summary>
     /// To configure plugin, before OTel SDK configuration is called.
@@ -269,6 +270,20 @@ public class Plugin
     /// <returns>The configured metric provider builder</returns>
     public MeterProviderBuilder AfterConfigureMeterProvider(MeterProviderBuilder builder)
     {
+        // Add EMF metric reader if configured
+        if (this.emfMetricReader != null)
+        {
+            builder.AddReader(this.emfMetricReader);
+            // Configure exponential histogram aggregation for histogram instruments
+            builder.AddView(instrument =>
+            {
+                return instrument.GetType().GetGenericTypeDefinition() == typeof(Histogram<>)
+                    ? new Base2ExponentialBucketHistogramConfiguration()
+                    : null;
+            });
+            Logger.Log(LogLevel.Information, "AWS EMF exporter enabled with DELTA temporality and exponential histograms.");
+        }
+
         if (!this.IsApplicationSignalsRuntimeEnabled())
         {
             return builder;
@@ -537,9 +552,10 @@ public class Plugin
             var emfExporter = this.CreateEmfExporter();
             if (emfExporter != null)
             {
-                var periodicExportingMetricReader = new PeriodicExportingMetricReader(emfExporter, GetMetricExportInterval());
-                // Store the metric reader for later use in configure method
-                // This follows the TypeScript pattern where metricReader is set in customizeMetricReader
+                this.emfMetricReader = new PeriodicExportingMetricReader(emfExporter, GetMetricExportInterval())
+                {
+                    TemporalityPreference = MetricReaderTemporalityPreference.Delta
+                };
             }
         }
     }
