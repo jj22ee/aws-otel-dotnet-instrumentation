@@ -94,6 +94,15 @@ public class Plugin
     /// </summary>
     public void Initializing()
     {
+        try
+        {
+            File.AppendAllText("/app/logs/plugin-debug.log", $"[{DateTime.Now}] Plugin.Initializing() called\n");
+            Console.WriteLine("Plugin.Initializing() called");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in Initializing: {ex.Message}");
+        }
         this.CustomizeMetricReader();
     }
 
@@ -196,6 +205,15 @@ public class Plugin
     /// <returns>Returns configured builder</returns>
     public TracerProviderBuilder BeforeConfigureTracerProvider(TracerProviderBuilder builder)
     {
+        try
+        {
+            File.AppendAllText("/app/logs/plugin-debug.log", $"[{DateTime.Now}] BeforeConfigureTracerProvider called\n");
+            Console.WriteLine("BeforeConfigureTracerProvider called");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in BeforeConfigureTracerProvider logging: {ex.Message}");
+        }
         if (this.IsApplicationSignalsEnabled())
         {
             var resourceBuilder = ResourceBuilder
@@ -271,8 +289,15 @@ public class Plugin
     public MeterProviderBuilder AfterConfigureMeterProvider(MeterProviderBuilder builder)
     {
         // Add EMF metric reader if configured
+
+        Logger.Log(
+            LogLevel.Error, "Check if EMF Metric Reader is configured");
+            Console.WriteLine("\nCheck if EMF Metric Reader is configured.");
         if (this.emfMetricReader != null)
         {
+            Logger.Log(
+                LogLevel.Error, "EMF Metric READER is CONFIGURED");
+            Console.WriteLine("\nEMF Metric READER is CONFIGURED.");
             builder.AddReader(this.emfMetricReader);
             // Configure exponential histogram aggregation for histogram instruments
             builder.AddView(instrument =>
@@ -546,12 +571,27 @@ public class Plugin
 
     private void CustomizeMetricReader()
     {
+        Logger.Log(
+            LogLevel.Error, "CustomizeMetricReader()");
+        Console.WriteLine("\nCustomizeMetricReader().");
+        File.AppendAllText("/app/logs/plugin-debug.log", $"[{DateTime.Now}] CustomizeMetricReader()\n");
+        
         bool isEmfEnabled = this.CheckEmfExporterEnabled();
         if (isEmfEnabled)
         {
+            Logger.Log(
+                LogLevel.Error, "EMF IS Enabled");
+            Console.WriteLine("\nEMF IS Enabled.");
+            File.AppendAllText("/app/logs/plugin-debug.log", $"[{DateTime.Now}] EMF IS Enabled\n");
+            
             var emfExporter = this.CreateEmfExporter();
             if (emfExporter != null)
             {
+                Logger.Log(
+                    LogLevel.Error, "EMF Exporter is NOT null");
+                Console.WriteLine("\nEMF Exporter is NOT null.");
+                File.AppendAllText("/app/logs/plugin-debug.log", $"[{DateTime.Now}] EMF Exporter is NOT null\n");
+                
                 this.emfMetricReader = new PeriodicExportingMetricReader(emfExporter, GetMetricExportInterval())
                 {
                     TemporalityPreference = MetricReaderTemporalityPreference.Delta

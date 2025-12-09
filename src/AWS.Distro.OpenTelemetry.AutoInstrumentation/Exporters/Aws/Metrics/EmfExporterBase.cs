@@ -184,8 +184,8 @@ namespace AWS.Distro.OpenTelemetry.AutoInstrumentation.Exporters.Aws.Metrics
 
             record.Value = metric.MetricType switch
             {
-                MetricType.LongSum or MetricType.LongGauge => metricPoint.GetSumLong(),
-                MetricType.DoubleSum or MetricType.DoubleGauge => metricPoint.GetSumDouble(),
+                MetricType.LongSum or MetricType.LongGauge or MetricType.LongSumNonMonotonic or MetricType.LongGaugeNonMonotonic => metricPoint.GetSumLong(),
+                MetricType.DoubleSum or MetricType.DoubleGauge or MetricType.DoubleSumNonMonotonic or MetricType.DoubleGaugeNonMonotonic => metricPoint.GetSumDouble(),
                 _ => 0
             };
 
@@ -232,8 +232,6 @@ namespace AWS.Distro.OpenTelemetry.AutoInstrumentation.Exporters.Aws.Metrics
 
         /// <summary>
         /// Convert an ExponentialHistogram metric datapoint to a metric record.
-        /// This function follows the logic of CalculateDeltaDatapoints in the Go implementation,
-        /// converting exponential buckets to their midpoint values.
         /// </summary>
         private MetricRecord ConvertExpHistogram(Metric metric, ref readonly MetricPoint metricPoint)
         {
@@ -251,30 +249,21 @@ namespace AWS.Distro.OpenTelemetry.AutoInstrumentation.Exporters.Aws.Metrics
             var scale = expHistogram.Scale;
             var baseValue = Math.Pow(2, Math.Pow(2, -scale));
 
-            // Process positive buckets
+            // Process positive buckets using reflection
             if (expHistogram.PositiveBuckets != null)
             {
-                var positiveOffset = expHistogram.PositiveBuckets.Offset;
+                var positiveBucketsType = expHistogram.PositiveBuckets.GetType();
+                var offsetProperty = positiveBucketsType.GetProperty("Offset");
+                var positiveOffset = (int)(offsetProperty?.GetValue(expHistogram.PositiveBuckets) ?? 0);
                 
-                double bucketBegin = 0;
-                double bucketEnd = 0;
-
-                // Use foreach to iterate through the buckets
                 var bucketIndex = 0;
-                foreach (var bucketCount in expHistogram.PositiveBuckets)
+                var enumerator = expHistogram.PositiveBuckets.GetEnumerator();
+                while (enumerator.MoveNext())
                 {
+                    var bucketCount = enumerator.Current;
                     var index = bucketIndex + positiveOffset;
-
-                    if (bucketBegin == 0)
-                    {
-                        bucketBegin = Math.Pow(baseValue, index);
-                    }
-                    else
-                    {
-                        bucketBegin = bucketEnd;
-                    }
-
-                    bucketEnd = Math.Pow(baseValue, index + 1);
+                    var bucketBegin = Math.Pow(baseValue, index);
+                    var bucketEnd = Math.Pow(baseValue, index + 1);
                     var metricVal = (bucketBegin + bucketEnd) / 2;
 
                     if (bucketCount > 0)
@@ -295,40 +284,40 @@ namespace AWS.Distro.OpenTelemetry.AutoInstrumentation.Exporters.Aws.Metrics
                 arrayCounts.Add(zeroCount);
             }
 
-            // Access internal NegativeBuckets using reflection
-            var negativeBucketsProperty = expHistogram.GetType().GetProperty("NegativeBuckets", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var negativeBuckets = negativeBucketsProperty?.GetValue(expHistogram) as dynamic;
+            // Process negative buckets using reflection
+            var negativeBucketsProperty = expHistogram.GetType().GetProperty("NegativeBuckets");
+            var negativeBuckets = negativeBucketsProperty?.GetValue(expHistogram);
             
             if (negativeBuckets != null)
             {
-                var negativeOffset = (int)negativeBuckets.Offset;
-                var negativeBucketCounts = ((System.Collections.IEnumerable)negativeBuckets).Cast<object>().ToArray();
-
-                double bucketBegin = 0;
-                double bucketEnd = 0;
-
-                for (int i = 0; i < negativeBucketCounts.Length; i++)
+                var negativeBucketsType = negativeBuckets.GetType();
+                var offsetProperty = negativeBucketsType.GetProperty("Offset");
+                var negativeOffset = (int)(offsetProperty?.GetValue(negativeBuckets) ?? 0);
+                
+                var getEnumeratorMethod = negativeBucketsType.GetMethod("GetEnumerator");
+                var enumerator = getEnumeratorMethod?.Invoke(negativeBuckets, null);
+                
+                if (enumerator != null)
                 {
-                    var bucketCount = Convert.ToInt64(negativeBucketCounts[i]);
-                    var index = i + negativeOffset;
-
-                    if (bucketEnd == 0)
+                    var moveNextMethod = enumerator.GetType().GetMethod("MoveNext");
+                    var currentProperty = enumerator.GetType().GetProperty("Current");
+                    
+                    var bucketIndex = 0;
+                    while ((bool)(moveNextMethod?.Invoke(enumerator, null) ?? false))
                     {
-                        bucketEnd = -Math.Pow(baseValue, index);
-                    }
-                    else
-                    {
-                        bucketEnd = bucketBegin;
-                    }
+                        var bucketCount = Convert.ToInt64(currentProperty?.GetValue(enumerator));
+                        var index = bucketIndex + negativeOffset;
+                        var bucketEnd = -Math.Pow(baseValue, index);
+                        var bucketBegin = -Math.Pow(baseValue, index + 1);
+                        var metricVal = (bucketBegin + bucketEnd) / 2;
 
-                    bucketBegin = -Math.Pow(baseValue, index + 1);
-                    var metricVal = (bucketBegin + bucketEnd) / 2;
-
-                    if (bucketCount > 0)
-                    {
-                        arrayValues.Add(metricVal);
-                        arrayCounts.Add(bucketCount);
+                        if (bucketCount > 0)
+                        {
+                            arrayValues.Add(metricVal);
+                            arrayCounts.Add(bucketCount);
+                        }
+                        
+                        bucketIndex++;
                     }
                 }
             }
@@ -340,7 +329,6 @@ namespace AWS.Distro.OpenTelemetry.AutoInstrumentation.Exporters.Aws.Metrics
                 timestampMs,
                 attributes);
 
-            // Calculate min and max from the histogram data
             var min = 0.0;
             var max = 0.0;
             if (metricPoint.TryGetHistogramMinMaxValues(out var minValue, out var maxValue))
@@ -519,27 +507,57 @@ namespace AWS.Distro.OpenTelemetry.AutoInstrumentation.Exporters.Aws.Metrics
         /// </summary>
         public override ExportResult Export(in Batch<Metric> batch)
         {
+            Console.WriteLine($"\nEMF Export called with {batch.Count} metrics.");
+            File.AppendAllText("/app/logs/plugin-debug.log", $"[{DateTime.Now}] EMF Export called with {batch.Count} metrics\n");
             try
             {
                 var resource = ParentProvider?.GetResource() ?? Resource.Empty;
                 var groupedMetrics = new Dictionary<string, Dictionary<long, List<MetricRecord>>>();
 
+                var metricNames = new List<string>();
                 foreach (var metric in batch)
                 {
-                    foreach (var metricPoint in metric.GetMetricPoints())
+                    metricNames.Add($"{metric.Name}({metric.MeterName})");
+                }
+                Console.WriteLine($"All metrics in batch: {string.Join(", ", metricNames)}");
+                File.AppendAllText("/app/logs/plugin-debug.log", $"[{DateTime.Now}] All metrics: {string.Join(", ", metricNames)}\n");
+                
+                foreach (var metric in batch)
+                {
+                    try
                     {
-                        MetricRecord record = metric.MetricType switch
+                        Console.WriteLine($"Processing metric: {metric.Name} from meter: {metric.MeterName} (type: {metric.MetricType})");
+                        File.AppendAllText("/app/logs/plugin-debug.log", $"[{DateTime.Now}] Processing metric: {metric.Name} from meter: {metric.MeterName} (type: {metric.MetricType})\n");
+                        
+                        if (metric.MeterName == "dice-lib")
                         {
-                            MetricType.LongSum or MetricType.LongGauge or MetricType.DoubleSum or MetricType.DoubleGauge => ConvertGaugeAndSum(metric, in metricPoint),
-                            MetricType.Histogram => ConvertHistogram(metric, in metricPoint),
-                            MetricType.ExponentialHistogram => ConvertExpHistogram(metric, in metricPoint),
-                            _ => throw new NotSupportedException($"Unsupported metric type: {metric.MetricType}")
-                        };
+                            Console.WriteLine($"*** FOUND DICE-LIB METRIC: {metric.Name} ***");
+                            File.AppendAllText("/app/logs/plugin-debug.log", $"[{DateTime.Now}] *** FOUND DICE-LIB METRIC: {metric.Name} ***\n");
+                        }
+                        
+                        foreach (var metricPoint in metric.GetMetricPoints())
+                        {
+                            MetricRecord record = metric.MetricType switch
+                            {
+                                MetricType.LongSum or MetricType.LongGauge or MetricType.DoubleSum or MetricType.DoubleGauge or MetricType.LongSumNonMonotonic or MetricType.DoubleSumNonMonotonic or MetricType.LongGaugeNonMonotonic or MetricType.DoubleGaugeNonMonotonic => ConvertGaugeAndSum(metric, in metricPoint),
+                                MetricType.Histogram => ConvertHistogram(metric, in metricPoint),
+                                MetricType.ExponentialHistogram => ConvertExpHistogram(metric, in metricPoint),
+                                _ => throw new NotSupportedException($"Unsupported metric type: {metric.MetricType}")
+                            };
 
-                        var (groupAttribute, groupTimestamp) = GroupByAttributesAndTimestamp(record);
-                        PushMetricRecordIntoGroupedMetrics(groupedMetrics, groupAttribute, groupTimestamp, record);
+                            var (groupAttribute, groupTimestamp) = GroupByAttributesAndTimestamp(record);
+                            PushMetricRecordIntoGroupedMetrics(groupedMetrics, groupAttribute, groupTimestamp, record);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Error processing metric {metric.Name}: {ex.Message}");
+                        File.AppendAllText("/app/logs/plugin-debug.log", $"[{DateTime.Now}] Error processing metric {metric.Name}: {ex.Message}\n");
                     }
                 }
+                
+                Console.WriteLine($"Finished processing all {batch.Count} metrics. Creating EMF logs...");
+                File.AppendAllText("/app/logs/plugin-debug.log", $"[{DateTime.Now}] Finished processing all {batch.Count} metrics. Creating EMF logs...\n");
 
                 // Process each group separately to create one EMF log per group
                 foreach (var metricsRecordsGroupedByTimestamp in groupedMetrics.Values)

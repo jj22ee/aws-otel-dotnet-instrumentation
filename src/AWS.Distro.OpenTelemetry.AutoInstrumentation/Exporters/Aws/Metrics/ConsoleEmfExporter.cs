@@ -33,7 +33,8 @@ namespace AWS.Distro.OpenTelemetry.AutoInstrumentation.Exporters.Aws.Metrics
         /// </summary>
         protected override Task SendLogEventAsync(LogEvent logEvent)
         {
-            Console.WriteLine(logEvent.Message);
+            Console.WriteLine($"[EMF EXPORT] {DateTime.Now}: {logEvent.Message}");
+            File.AppendAllText("/app/logs/emf-debug.log", $"[{DateTime.Now}] EMF Export: {logEvent.Message}\n");
             return Task.CompletedTask;
         }
 
